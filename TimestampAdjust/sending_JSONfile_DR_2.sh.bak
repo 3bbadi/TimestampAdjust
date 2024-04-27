@@ -1,0 +1,122 @@
+#!/bin/bash
+# Script name: sending_JSONfile_DR_2.sh
+#C5-NGVS-2 /var/backup/vs/main/cdr/3bbadi
+
+
+# Set the source directory where JSON files are located
+source_directory="/var/backup/vs/main/cdr"
+
+# Set the destination server details
+
+destination_username="ngvs"
+destination_directory="/tmp/VSCDR"
+
+# Log file to track sent files
+sent_files="./sent_files.log"
+log_file="./logs.log"
+
+# Additional file to store file counts and line counts
+count_file="./file_counts.txt"
+
+	#Use the dynamically determined destination_server
+hostnamenum=$(hostname | awk -F- '{print $3}')
+
+if [ "$hostnamenum" -eq 1 ]; then
+    destination_server="10.22.95.84"
+elif [ "$hostnamenum" -eq 2 ]; then
+    destination_server="10.22.95.85"
+elif [ "$hostnamenum" -eq 3 ]; then
+    destination_server="10.22.95.86"
+elif [ "$hostnamenum" -eq 4 ]; then
+    destination_server="10.22.95.87"
+elif [ "$hostnamenum" -eq 5 ]; then
+    destination_server="10.22.95.88"
+else
+    echo "Can't detrime hostname (check line: 7)" >> "$log_file"
+fi
+
+
+
+
+# Ensure the source directory exists
+if [ ! -d "$source_directory" ]; then
+    echo "Source directory '$source_directory' not found."
+    exit 1
+fi
+
+# Ensure the log file exists or create it if not
+touch "$sent_files"
+
+# Ensure the count file exists or create it if not
+echo "File Counts and Line Counts:" > "$count_file"
+
+# Function to check if a file has been sent today
+file_sent_today() {
+    local file="$1"
+   # local today_date=$(date +%Y-%m-%d)
+    #grep -q "^${file}:${today_date}$" "$sent_files"
+	grep -q "^${file}" "$sent_files"
+}
+
+# Function to count lines in a file
+count_lines_in_file() {
+    local file="$1"
+    wc -l < "$file"
+}
+
+# Initialize counters
+file_count=0
+
+# Loop through each JSON file in the source directory
+for file in "$source_directory"/*.json; do
+    if [ -f "$file" ]; then
+        filename=$(basename "$file")
+        
+        # Check if the file has been sent
+        if file_sent "$filename"; then
+            echo "Skipping $filename as it has already been sent."
+        else
+            echo "Copying $filename to $destination_server..."
+            
+            # Use scp to securely copy the file to the destination server
+            scp "$file" "$destination_username"@"$destination_server":"$destination_directory"
+            
+            # Check the exit status of scp command
+            if [ $? -eq 0 ]; then
+                echo "Successfully copied $filename to $destination_server."
+                
+                # Log the sent file
+                echo "${filename}" >> "$sent_files"
+                
+                # Get the line count of the file and log it
+                line_count=$(count_lines_in_file "$file")
+                echo "File: $filename, Lines: $line_count" >> "$count_file"
+                
+                ((file_count++))
+            else
+                echo "Failed to copy $filename to $destination_server."
+            fi
+        fi
+    fi
+done
+
+# Add total file count to the count file
+echo "Total Files Sent: $file_count" >> "$count_file"
+
+# Remove old entries from the log file (keep only the last 100 entries)
+if [ $(wc -l < "$sent_files") -gt 100 ]; then
+    tail -n 100 "$sent_files" > "$sent_files.tmp"
+    mv "$sent_files.tmp" "$sent_files"
+fi
+
+echo "All JSON files processed for today."
+
+# Copy the count file to the destination server
+scp "$count_file" "$destination_username"@"$destination_server":"$destination_directory"
+if [ $? -eq 0 ]; then
+    echo "Count file successfully copied to $destination_server."
+else
+    echo "Failed to copy count file to $destination_server."
+fi
+
+echo "All JSON files processed for today."
