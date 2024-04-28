@@ -1,0 +1,90 @@
+#!/bin/bash
+# Script name: sending_JSONfile_DR.sh
+
+# Load environment variables from .env file
+set -o allexport
+source .env
+set +o allexport
+
+echo "starting script sending_JSONfile_DR_2.sh" >> "$LOG_FILE"
+
+# Ensure the source directory exists
+if [ ! -d "$SOURCE_DIRECTORY" ]; then
+    echo "Source directory '$SOURCE_DIRECTORY' not found."
+    exit 1
+fi
+
+# Ensure the log file exists or create it if not
+touch "$SENT_FILES"
+
+# Ensure the count file exists or create it if not
+echo "File Counts and Line Counts:" > "$COUNT_FILE"
+
+# Function to check if a file has been sent today
+file_sent_today() {
+    local file="$1"
+    grep -q "^${file}" "$SENT_FILES"
+}
+
+# Function to count lines in a file
+count_lines_in_file() {
+    local file="$1"
+    wc -l < "$file"
+}
+
+# Initialize counters
+file_count=0
+
+# Loop through each JSON file in the source directory
+for file in "$SOURCE_DIRECTORY"/*.json; do
+    if [ -f "$file" ]; then
+        filename=$(basename "$file")
+        
+        # Check if the file has been sent
+        if file_sent_today "$filename"; then
+            echo "Skipping $filename as it has already been sent."
+        else
+            echo "Copying $filename to $DESTINATION_SERVER..."
+            
+            # Use scp to securely copy the file to the destination server
+            scp "$file" "$DESTINATION_USERNAME"@"$DESTINATION_SERVER":"$DESTINATION_DIRECTORY"
+            
+            # Check the exit status of scp command
+            if [ $? -eq 0 ]; then
+                echo "Successfully copied $filename to $DESTINATION_SERVER."
+                
+                # Log the sent file
+                echo "${filename}" >> "$SENT_FILES"
+                
+                # Get the line count of the file and log it
+                line_count=$(count_lines_in_file "$file")
+                echo "File: $filename, Lines: $line_count" >> "$COUNT_FILE"
+                
+                ((file_count++))
+            else
+                echo "Failed to copy $filename to $DESTINATION_SERVER."
+            fi
+        fi
+    fi
+done
+
+# Add total file count to the count file
+echo "Total Files Sent: $file_count" >> "$COUNT_FILE"
+
+# Remove old entries from the log file (keep only the last 100 entries)
+if [ $(wc -l < "$SENT_FILES") -gt 100 ]; then
+    tail -n 100 "$SENT_FILES" > "$SENT_FILES.tmp"
+    mv "$SENT_FILES.tmp" "$SENT_FILES"
+fi
+
+echo "All JSON files processed for today."
+
+# Copy the count file to the destination server
+scp "$COUNT_FILE" "$DESTINATION_USERNAME"@"$DESTINATION_SERVER":"$DESTINATION_DIRECTORY"
+if [ $? -eq 0 ]; then
+    echo "Count file successfully copied to $DESTINATION_SERVER."
+else
+    echo "Failed to copy count file to $DESTINATION_SERVER."
+fi
+
+echo "Finished sending_JSONfile_DR_2.sh script."

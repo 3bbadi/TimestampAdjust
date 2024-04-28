@@ -1,0 +1,52 @@
+#!/bin/bash
+# scriptName: cdr_processor_mod.sh
+
+# Load environment variables from .env file
+set -o allexport
+source .env
+set +o allexport
+
+echo "starting script cdr_processor_mod.sh" >> "$LOG_FILE"
+
+cd "$WORKING_DIR"
+
+numberOfFiles=0
+numberOfErrors=0
+
+for f in *.json; do
+  actual_lines=$(wc -l <"$f")
+
+  sed "s/$/,/g" "$f" > "$WORKING_DIR/bkp_$f"_bkp
+  sed '$s/,$//' "$WORKING_DIR/bkp_$f"_bkp > "$WORKING_DIR/bkp2_$f"_bkp
+  sed -e '1s/^/[/' -e 's/$/,/' -e '$s/,$/]/' "$WORKING_DIR/bkp2_$f"_bkp > "$WORKING_DIR/bkp3_$f"_bkp
+  sed -i 's/,,/,/g' "$WORKING_DIR/bkp3_$f"_bkp
+  cp -p "$WORKING_DIR/bkp3_$f"_bkp "$f"
+
+  if cp "$f" "$TEMP_DIR"; then
+    echo "$f has been sent at $(date +'%Y-%m-%d %T')" >> "$LOG_FILE"
+    ((numberOfFiles++))
+  else
+    echo "Error: $f could not be sent at $(date +'%Y-%m-%d %T')" >> "$LOG_FILE"
+    ((numberOfErrors++))
+  fi
+
+  mv "$WORKING_DIR/$f" "$ARCHIVE_DIR"
+
+  rm -f "$WORKING_DIR/bkp_$f"_bkp
+  rm -f "$WORKING_DIR/bkp2_$f"_bkp
+  rm -f "$WORKING_DIR/bkp3_$f"_bkp
+
+  expected_lines=$(wc -l <"$f")
+
+  if [ "$expected_lines" -ne "$actual_lines" ]; then
+    echo "Error: $f has an unexpected number of lines (expected: $expected_lines, actual: $actual_lines)" >> "$LOG_FILE"
+    ((numberOfErrors++))
+  fi
+done
+
+echo "$numberOfFiles files have been sent at $(date +'%Y-%m-%d %T')" >> "$LOG_FILE"
+echo "$numberOfErrors errors occurred during processing at $(date +'%Y-%m-%d %T')" >> "$LOG_FILE"
+
+gzip "$ARCHIVE_DIR"/*.json
+
+echo "finished cdr_processor_mod.sh script at $(date +'%Y-%m-%d %T')" >> "$LOG_FILE"
